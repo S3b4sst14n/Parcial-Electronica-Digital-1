@@ -25,9 +25,13 @@
       </div>
 
       <div class="hero__side">
-        <div id="estado" class="estado estado--conectando">
+        <div id="estado" class="estado estado--conectando" title="Enlace del navegador con el broker MQTT">
           <span class="estado__led"></span>
           <span id="estado_texto">Conectando…</span>
+        </div>
+        <div id="estado_placa" class="estado estado--error" title="Presencia de la ESP32 en el broker">
+          <span class="estado__led"></span>
+          <span id="estado_placa_texto">ESP32 sin señal</span>
         </div>
         <span class="hero__grupo">Juan Sebastian <b id="grupo_badge">Sanjuanelo </b></span>
       </div>
@@ -134,6 +138,7 @@
     <footer class="pie">
       <span><i class="pie__punto pie__punto--rx"></i>estado <code id="topic_estado">—</code></span>
       <span><i class="pie__punto pie__punto--tx"></i>control <code id="topic_control">—</code></span>
+      <span><i class="pie__punto pie__punto--rx"></i>presencia <code id="topic_presencia">—</code></span>
     </footer>
 
   </div>
