@@ -37,8 +37,15 @@ TOPIC_PRESENCIA  = f"clase/decoder/{GRUPO}/presencia"  # ESP32 -> panel web ("on
 WIFI_TIMEOUT_MS = 10000    # plazo máximo para conseguir IP
 WIFI_REINTENTO_MS = 300    # pausa entre consultas de isconnected()
 PERIODO_SONDEO_MS = 150    # periodo del bucle principal
-LATIDO_MS = 15000          # cada cuánto se reconfirma "online" aunque nada cambie
+LATIDO_MS = 10000          # cada cuánto se reconfirma "online" aunque nada cambie
 RECONEXION_MS = 2000       # pausa antes de reintentar tras perder la conexión
+
+# Plazo que el broker espera sin recibir nada antes de dar por muerta la sesión
+# y publicar el last will. Con el valor 0 que trae umqtt por omisión el broker
+# NO vigila nada: al detener la simulación de Wokwi el socket queda a medio
+# cerrar, el "offline" nunca se publica y el panel web sigue creyendo que la
+# placa está ahí. Debe ser mayor que LATIDO_MS.
+KEEPALIVE_S = 30
 
 # --- Cableado --------------------------------------------------------------
 # DIP switch: la posición en la lista es el peso del bit. DIP_PINS[0] es el LSB
@@ -224,8 +231,13 @@ def conectar_mqtt():
     cae el WiFi, se cierra la pestaña del simulador). Así el panel web puede
     distinguir "la placa está encendida pero nadie mueve el switch" de "la
     placa ya no está".
+
+    El last will por sí solo no basta: el broker únicamente lo dispara cuando
+    da la sesión por perdida, y para eso necesita el keepalive que se le pasa
+    al constructor. El latido del bucle principal (cada LATIDO_MS) es lo que
+    mantiene viva la sesión mientras la placa sí está corriendo.
     """
-    client = MQTTClient(MQTT_CLIENT_ID, MQTT_BROKER)
+    client = MQTTClient(MQTT_CLIENT_ID, MQTT_BROKER, keepalive=KEEPALIVE_S)
     client.set_callback(al_llegar_comando)
     client.set_last_will(TOPIC_PRESENCIA, b"offline", retain=True, qos=0)
     client.connect()
