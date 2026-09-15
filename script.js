@@ -1,8 +1,14 @@
 // Debe coincidir EXACTAMENTE con los tópicos de la ESP32 (main.py)
 const GRUPO = "Sanjuanelo";
 
-const TOPIC_ESTADO  = `clase/decoder/${GRUPO}/estado`;   // ESP32 -> Web
-const TOPIC_CONTROL = `clase/decoder/${GRUPO}/control`;  // Web   -> ESP32
+const TOPIC_ESTADO    = `clase/decoder/${GRUPO}/estado`;     // ESP32 -> Web
+const TOPIC_CONTROL   = `clase/decoder/${GRUPO}/control`;    // Web   -> ESP32
+const TOPIC_PRESENCIA = `clase/decoder/${GRUPO}/presencia`;  // ESP32 -> Web ("online"/"offline")
+
+// La placa reconfirma "online" cada LATIDO_MS (15 s en main_con_conectividad.py).
+// Si pasa más de este plazo sin una sola señal suya, se la da por caída aunque
+// el broker todavía no haya publicado el last will.
+const TIEMPO_SIN_SENAL_MS = 40000;
 
 const VALOR_MIN = 0;
 const VALOR_MAX = 15;   // palabra de 4 bits: 0000 (0) .. 1111 (F)
@@ -50,16 +56,22 @@ const elPalabraHex  = $("palabra_hex");
 const elAutoEnvio   = $("auto_envio");
 const elEspejo      = $("espejo");
 const elLog         = $("log");
+const elEstadoPlaca      = $("estado_placa");
+const elEstadoPlacaTexto = $("estado_placa_texto");
+const elMonitor          = document.querySelector(".monitor");
 
-$("grupo_badge").textContent   = GRUPO;
-$("topic_estado").textContent  = TOPIC_ESTADO;
-$("topic_control").textContent = TOPIC_CONTROL;
+$("grupo_badge").textContent      = GRUPO;
+$("topic_estado").textContent     = TOPIC_ESTADO;
+$("topic_control").textContent    = TOPIC_CONTROL;
+$("topic_presencia").textContent  = TOPIC_PRESENCIA;
 
 
 // Estado de la aplicación
 // bits[i] corresponde al bit de peso 2^i (bits[0] = LSB)
 const bits = [0, 0, 0, 0];
-let conectado = false;
+let conectado = false;      // navegador <-> broker
+let placaViva = false;      // ESP32 publicando en el broker
+let temporizadorPlaca = null;
 
 
 // Utilidades de formato
@@ -275,7 +287,15 @@ function enviarValor() {
     if (valor < VALOR_MIN || valor > VALOR_MAX) return;   // validar rango
 
     if (!conectado || !client.isConnected()) {
-        registrar("Sin conexión: no se envió " + aBinario(valor), "err");
+        registrar("Sin broker: no se envió " + aBinario(valor), "err");
+        return;
+    }
+
+    // El tópico de control no es retenido: si nadie está suscrito, el mensaje
+    // se pierde en el broker. Enviarlo con la placa apagada solo serviría para
+    // pintar un valor falso en el monitor.
+    if (!placaViva) {
+        registrar("ESP32 desconectada: no se envió " + aBinario(valor), "err");
         return;
     }
 
@@ -321,15 +341,78 @@ document.addEventListener("keydown", (e) => {
 
 
 // Estado visual de la conexión
+//
+// Son dos enlaces distintos y hasta ahora el panel solo miraba el primero:
+//
+//   1. navegador  <-> broker.hivemq.com   -> píldora "estado"
+//   2. ESP32      <-> broker.hivemq.com   -> píldora "estado_placa"
+//
+// El broker responde aunque la simulación de Wokwi esté detenida, así que el
+// primer enlace no dice absolutamente nada sobre la placa. Por eso se separan.
+
 function fijarEstado(clase, texto) {
     elEstado.className = "estado estado--" + clase;
     elEstadoTexto.textContent = texto;
 
     conectado = clase === "ok";
+
+    // Si se cae el broker, tampoco hay forma de saber nada de la placa.
+    if (!conectado) marcarPlaca(false, "broker caído");
+
+    actualizarHabilitacion();
+}
+
+function fijarEstadoPlaca(clase, texto) {
+    elEstadoPlaca.className = "estado estado--" + clase;
+    elEstadoPlacaTexto.textContent = texto;
+}
+
+/**
+ * Registra si la ESP32 está viva y ajusta toda la interfaz en consecuencia.
+ *
+ * Se llama desde tres sitios: el tópico de presencia ("online"/"offline", que
+ * incluye el last will que publica el propio broker cuando la placa desaparece
+ * sin avisar), cada mensaje de estado (publicar es prueba de vida) y el
+ * temporizador de silencio.
+ */
+function marcarPlaca(viva, motivo = "") {
+    const cambio = viva !== placaViva;
+    placaViva = viva;
+
+    clearTimeout(temporizadorPlaca);
+
+    if (viva) {
+        fijarEstadoPlaca("ok", "ESP32 en línea");
+        elMonitor.classList.remove("monitor--offline");
+        // Si la placa deja de dar señales de vida, se vence el plazo y la
+        // píldora vuelve a rojo sin esperar al broker.
+        temporizadorPlaca = setTimeout(
+            () => marcarPlaca(false, "sin latido en " + TIEMPO_SIN_SENAL_MS / 1000 + " s"),
+            TIEMPO_SIN_SENAL_MS
+        );
+        if (cambio) registrar("ESP32 en línea", "rx");
+    } else {
+        fijarEstadoPlaca("error", "ESP32 desconectada");
+        elMonitor.classList.add("monitor--offline");
+        // Solo si de verdad hay algo pintado; si el monitor está vacío,
+        // "sin datos" sigue siendo la etiqueta correcta.
+        if (!elValorDec.classList.contains("lectura__dec--vacio")) {
+            elOrigen.textContent = "último dato retenido";
+        }
+        if (cambio) registrar("ESP32 fuera de línea" + (motivo ? ` (${motivo})` : ""), "err");
+    }
+
+    actualizarHabilitacion();
+}
+
+/** Los controles solo tienen sentido si hay broker Y hay placa escuchando. */
+function actualizarHabilitacion() {
+    const utilizable = conectado && placaViva;
+
     botonesBit.forEach((btn) => { btn.disabled = !conectado; });
     $("btn_clear").disabled  = !conectado;
     $("btn_full").disabled   = !conectado;
-    $("btn_enviar").disabled = !conectado;
+    $("btn_enviar").disabled = !utilizable;
 }
 
 
@@ -345,9 +428,19 @@ function conectar() {
     client.connect({
         useSSL: true,   // requerido para el puerto 8884
         onSuccess: () => {
-            fijarEstado("ok", "Conectado");
+            fijarEstado("ok", "Broker conectado");
             client.subscribe(TOPIC_ESTADO);
+            client.subscribe(TOPIC_PRESENCIA);
             registrar("Conectado a broker.hivemq.com", "info");
+
+            // El "online" retenido (si existe) llega en milisegundos. Si no
+            // llega nada en unos segundos es que la placa nunca ha publicado.
+            fijarEstadoPlaca("conectando", "Buscando ESP32…");
+            clearTimeout(temporizadorPlaca);
+            temporizadorPlaca = setTimeout(
+                () => marcarPlaca(false, "sin respuesta en el tópico de presencia"),
+                5000
+            );
         },
         onFailure: (err) => {
             fijarEstado("error", "Sin conexión");
@@ -369,6 +462,13 @@ client.onConnectionLost = (respuesta) => {
 // Mensajes entrantes (ESP32 -> Frontend): "bbbb,decimal"
 client.onMessageArrived = (message) => {
     try {
+        // Ahora hay dos suscripciones, así que hay que mirar de cuál viene.
+        if (message.destinationName === TOPIC_PRESENCIA) {
+            const aviso = message.payloadString.trim();
+            marcarPlaca(aviso === "online", aviso === "offline" ? "aviso del broker" : aviso);
+            return;
+        }
+
         const datos = message.payloadString.split(",");
         if (datos.length !== 2) return;
 
@@ -380,9 +480,19 @@ client.onMessageArrived = (message) => {
         const valorValido = !isNaN(valor) && valor >= VALOR_MIN && valor <= VALOR_MAX;
 
         if (binarioValido && valorValido) {
+            // Un estado recién publicado también es prueba de vida y reinicia
+            // el plazo del temporizador de silencio. Pero OJO con message.retained:
+            // ese es el último valor que el broker guardó y lo entrega al
+            // suscribirse aunque la placa lleve horas apagada. Tomarlo como
+            // señal de vida es justo lo que hacía parecer que todo estaba
+            // funcionando con Wokwi detenido.
+            if (!message.retained) marcarPlaca(true);
+
             pintarMonitor(valor, binario);
-            elOrigen.textContent = "DIP switch físico";
-            registrar(`RX ${binario} → ${valor} (${aHex(valor)})`, "rx");
+            elOrigen.textContent = message.retained
+                ? "último dato retenido"
+                : "DIP switch físico";
+            registrar(`RX ${binario} → ${valor} (${aHex(valor)})${message.retained ? " [retenido]" : ""}`, "rx");
 
             // El teclado de la tarjeta Control pasa a mostrar la posición real
             // del switch, de modo que los dos paneles cuenten lo mismo.
