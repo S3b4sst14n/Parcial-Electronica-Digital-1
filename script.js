@@ -1,9 +1,9 @@
-
 // Debe coincidir EXACTAMENTE con los tópicos de la ESP32 (main.py)
 const GRUPO = "Sanjuanelo";
 
-const TOPIC_ESTADO  = `clase/decoder/${GRUPO}/estado`;   // ESP32 -> Web
-const TOPIC_CONTROL = `clase/decoder/${GRUPO}/control`;  // Web   -> ESP32
+const TOPIC_ESTADO     = `clase/decoder/${GRUPO}/estado`;     // ESP32 -> Web
+const TOPIC_CONTROL    = `clase/decoder/${GRUPO}/control`;    // Web   -> ESP32
+const TOPIC_PRESENCIA  = `clase/decoder/${GRUPO}/presencia`;  // ESP32 -> Web ("online"/"offline")
 
 const VALOR_MIN = 0;
 const VALOR_MAX = 15;   // palabra de 4 bits: 0000 (0) .. 1111 (F)
@@ -37,6 +37,8 @@ const $ = (id) => document.getElementById(id);
 
 const elEstado      = $("estado");
 const elEstadoTexto = $("estado_texto");
+const elPlaca       = $("placa");
+const elPlacaTexto  = $("placa_texto");
 const elValorDec    = $("valor_dec");
 const elValorHex    = $("valor_hex");
 const elValorBin    = $("valor_bin");
@@ -54,6 +56,7 @@ const elLog         = $("log");
 $("grupo_badge").textContent   = GRUPO;
 $("topic_estado").textContent  = TOPIC_ESTADO;
 $("topic_control").textContent = TOPIC_CONTROL;
+$("topic_presencia").textContent = TOPIC_PRESENCIA;
 
 
 // Estado de la aplicación
@@ -302,7 +305,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 
-// Estado visual de la conexión
+// Estado visual de la conexión (del navegador con el broker MQTT)
 function fijarEstado(clase, texto) {
     elEstado.className = "estado estado--" + clase;
     elEstadoTexto.textContent = texto;
@@ -312,6 +315,14 @@ function fijarEstado(clase, texto) {
     $("btn_clear").disabled  = !conectado;
     $("btn_full").disabled   = !conectado;
     $("btn_enviar").disabled = !conectado;
+}
+
+// Estado visual de la placa (viene del tópico de presencia, no del propio
+// navegador: aunque el panel esté "Conectado" al broker, la ESP32 podría
+// estar apagada o sin WiFi en Wokwi).
+function fijarPlaca(clase, texto) {
+    elPlaca.className = "estado estado--mini estado--" + clase;
+    elPlacaTexto.textContent = texto;
 }
 
 
@@ -328,7 +339,9 @@ function conectar() {
         useSSL: true,   // requerido para el puerto 8884
         onSuccess: () => {
             fijarEstado("ok", "Conectado");
+            fijarPlaca("conectando", "Placa: buscando…");
             client.subscribe(TOPIC_ESTADO);
+            client.subscribe(TOPIC_PRESENCIA);
             registrar("Conectado a broker.hivemq.com", "info");
         },
         onFailure: (err) => {
@@ -348,9 +361,19 @@ client.onConnectionLost = (respuesta) => {
 };
 
 
-// Mensajes entrantes (ESP32 -> Frontend): "bbbb,decimal"
+// Mensajes entrantes (ESP32 -> Frontend)
 client.onMessageArrived = (message) => {
     try {
+        // Presencia de la placa: "online" / "offline" (este último puede
+        // llegar por el last will del broker si la ESP32 se cae sin avisar).
+        if (message.destinationName === TOPIC_PRESENCIA) {
+            const enLinea = message.payloadString.trim() === "online";
+            fijarPlaca(enLinea ? "ok" : "error", enLinea ? "Placa en línea" : "Placa desconectada");
+            if (!enLinea) registrar("La ESP32 se desconectó del broker", "err");
+            return;
+        }
+
+        // Estado del DIP switch: "bbbb,decimal"
         const datos = message.payloadString.split(",");
         if (datos.length !== 2) return;
 
@@ -365,6 +388,9 @@ client.onMessageArrived = (message) => {
             pintarMonitor(valor, binario);
             elOrigen.textContent = "DIP switch físico";
             registrar(`RX ${binario} → ${valor} (${aHex(valor)})`, "rx");
+            // Si llega un dato del switch es porque la placa está viva,
+            // aunque el mensaje de presencia todavía no haya llegado.
+            fijarPlaca("ok", "Placa en línea");
         }
     } catch (e) {
         // Nunca dejar el catch vacío
@@ -378,4 +404,5 @@ client.onMessageArrived = (message) => {
 limpiarMonitor();
 refrescarControl();
 logVacio();
+fijarPlaca("conectando", "Placa: sin datos");
 conectar();
