@@ -1,5 +1,5 @@
 // Debe coincidir EXACTAMENTE con los tópicos de la ESP32 (main.py)
-const GRUPO = "";
+const GRUPO = "Sanjuanelo";
 
 const TOPIC_ESTADO  = `clase/decoder/${GRUPO}/estado`;   // ESP32 -> Web
 const TOPIC_CONTROL = `clase/decoder/${GRUPO}/control`;  // Web   -> ESP32
