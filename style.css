@@ -236,6 +236,15 @@ body {
   grid-template-columns: auto 1fr;
   gap: 1.5rem;
   align-items: center;
+  transition: opacity 0.25s ease, filter 0.25s ease;
+}
+
+/* La ESP32 no está publicando: lo que se ve es el último dato retenido por el
+   broker, no una lectura en vivo. Se atenúa para que no se confunda con una
+   medida actual. */
+.monitor--offline {
+  opacity: 0.4;
+  filter: grayscale(0.7);
 }
 
 .bisel {
