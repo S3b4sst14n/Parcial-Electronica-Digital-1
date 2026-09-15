@@ -29,11 +29,7 @@
           <span class="estado__led"></span>
           <span id="estado_texto">Conectando…</span>
         </div>
-        <div id="placa" class="estado estado--mini estado--conectando">
-          <span class="estado__led"></span>
-          <span id="placa_texto">Placa: sin datos</span>
-        </div>
-        <span class="hero__grupo">Juan Sebastian <b id="grupo_badge">Sanjuanelo </b></span>
+        <span class="hero__grupo"> <b id="grupo_badge">Sanjuanelo </b></span>
       </div>
     </header>
 
@@ -113,6 +109,11 @@
           <span>Enviar al cambiar un bit</span>
         </label>
 
+        <label class="auto auto--seguida">
+          <input type="checkbox" id="espejo" checked>
+          <span>Reflejar el DIP switch físico</span>
+        </label>
+
         <p class="hint">
           <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> alternan bits ·
           <kbd>0</kbd> limpia · <kbd>Enter</kbd> envía
@@ -133,7 +134,6 @@
     <footer class="pie">
       <span><i class="pie__punto pie__punto--rx"></i>estado <code id="topic_estado">—</code></span>
       <span><i class="pie__punto pie__punto--tx"></i>control <code id="topic_control">—</code></span>
-      <span><i class="pie__punto pie__punto--rx"></i>presencia <code id="topic_presencia">—</code></span>
     </footer>
 
   </div>
