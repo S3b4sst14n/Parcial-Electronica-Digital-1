@@ -169,6 +169,11 @@ body {
   border-color: rgba(251, 113, 133, 0.35);
 }
 
+.estado--mini {
+  padding: 0.32rem 0.75rem;
+  font-size: 0.7rem;
+}
+
 @keyframes latido {
   0%, 100% { opacity: 1;    transform: scale(1); }
   50%      { opacity: 0.25; transform: scale(0.75); }
