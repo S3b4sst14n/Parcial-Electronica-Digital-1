@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decoder Remoto 4 bits — Panel de control</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="fondo" aria-hidden="true"></div>
+
+  <div class="app">
+
+    <!-- ===================== Encabezado ===================== -->
+    <header class="hero">
+      <div class="hero__brand">
+        <span class="hero__curso">Electrónica Digital 1 · Parcial</span>
+        <h1>Decoder remoto de 4&nbsp;bits</h1>
+        <p class="hero__sub">ESP32 · DIP switch · display de 7 segmentos · MQTT</p>
+      </div>
+
+      <div class="hero__side">
+        <div id="estado" class="estado estado--conectando">
+          <span class="estado__led"></span>
+          <span id="estado_texto">Conectando…</span>
+        </div>
+        <span class="hero__grupo">Juan Sebastian <b id="grupo_badge">Sanjuanelo </b></span>
+      </div>
+    </header>
+
+    <!-- ===================== Monitor (ESP32 → Web) ===================== -->
+    <section class="card" aria-label="Monitor del decodificador">
+      <div class="card__head">
+        <h2>Monitor</h2>
+        <span class="flow flow--rx">ESP32 → Web</span>
+      </div>
+
+      <div class="monitor">
+
+        <div class="bisel">
+          <svg class="siete-seg" viewBox="-12 -4 124 188" role="img" aria-labelledby="seg_titulo">
+            <title id="seg_titulo">Display de 7 segmentos</title>
+            <g transform="skewX(-6)">
+              <polygon id="seg-a" class="seg" points="20,15 27,8 83,8 90,15 83,22 27,22"/>
+              <polygon id="seg-b" class="seg" points="90,15 97,22 97,83 90,90 83,83 83,22"/>
+              <polygon id="seg-c" class="seg" points="90,90 97,97 97,158 90,165 83,158 83,97"/>
+              <polygon id="seg-d" class="seg" points="20,165 27,158 83,158 90,165 83,172 27,172"/>
+              <polygon id="seg-e" class="seg" points="20,90 27,97 27,158 20,165 13,158 13,97"/>
+              <polygon id="seg-f" class="seg" points="20,15 27,22 27,83 20,90 13,83 13,22"/>
+              <polygon id="seg-g" class="seg" points="20,90 27,83 83,83 90,90 83,97 27,97"/>
+            </g>
+          </svg>
+          <span class="bisel__brillo" aria-hidden="true"></span>
+        </div>
+
+        <div class="lectura">
+          <div class="lectura__fila">
+            <span id="valor_dec" class="lectura__dec">—</span>
+            <div class="lectura__tags">
+              <span class="tag"><em>HEX</em><b id="valor_hex">—</b></span>
+              <span class="tag"><em>BIN</em><b id="valor_bin">----</b></span>
+            </div>
+          </div>
+
+          <div class="leds" id="leds" aria-label="Bits recibidos desde la ESP32"></div>
+
+          <div class="lectura__pie">
+            <span class="origen">origen <b id="origen">sin datos</b></span>
+            <span class="sello" id="sello">—</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <div class="columnas">
+
+      <!-- ===================== Control (Web → ESP32) ===================== -->
+      <section class="card" aria-label="Teclado de 4 bits">
+        <div class="card__head">
+          <h2>Control</h2>
+          <span class="flow flow--tx">Web → ESP32</span>
+        </div>
+
+        <div class="dip" id="dip" role="group" aria-label="Bits a enviar"></div>
+
+        <div class="suma" id="suma" aria-hidden="true"></div>
+
+        <div class="palabra">
+          <span class="palabra__bin" id="palabra_bin">0000</span>
+          <span class="palabra__sep">→</span>
+          <span class="palabra__dec" id="palabra_dec">0</span>
+          <span class="palabra__hex" id="palabra_hex">0x0</span>
+        </div>
+
+        <div class="acciones">
+          <button type="button" class="btn" id="btn_clear">0000</button>
+          <button type="button" class="btn" id="btn_full">1111</button>
+          <button type="button" class="btn btn--primary" id="btn_enviar">Enviar</button>
+        </div>
+
+        <label class="auto">
+          <input type="checkbox" id="auto_envio" checked>
+          <span>Enviar al cambiar un bit</span>
+        </label>
+
+        <p class="hint">
+          <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> alternan bits ·
+          <kbd>0</kbd> limpia · <kbd>Enter</kbd> envía
+        </p>
+      </section>
+
+      <!-- ===================== Registro ===================== -->
+      <section class="card card--log" aria-label="Registro de actividad">
+        <div class="card__head">
+          <h2>Actividad</h2>
+          <button type="button" class="btn btn--mini" id="btn_limpiar_log">Limpiar</button>
+        </div>
+        <ul class="log" id="log"></ul>
+      </section>
+
+    </div>
+
+    <footer class="pie">
+      <span><i class="pie__punto pie__punto--rx"></i>estado <code id="topic_estado">—</code></span>
+      <span><i class="pie__punto pie__punto--tx"></i>control <code id="topic_control">—</code></span>
+    </footer>
+
+  </div>
+
+  <!-- Librería Paho MQTT (WebSockets) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
