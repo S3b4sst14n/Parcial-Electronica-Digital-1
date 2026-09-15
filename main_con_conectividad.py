@@ -29,13 +29,16 @@ WIFI_PASS = ""
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_CLIENT_ID = "esp32_" + GRUPO  # el broker desconecta clientes con ID repetido
 
-TOPIC_ESTADO = f"clase/decoder/{GRUPO}/estado"    # ESP32 -> panel web
-TOPIC_CONTROL = f"clase/decoder/{GRUPO}/control"  # panel web -> ESP32
+TOPIC_ESTADO     = f"clase/decoder/{GRUPO}/estado"     # ESP32 -> panel web
+TOPIC_CONTROL    = f"clase/decoder/{GRUPO}/control"    # panel web -> ESP32
+TOPIC_PRESENCIA  = f"clase/decoder/{GRUPO}/presencia"  # ESP32 -> panel web ("online"/"offline")
 
 # --- Tiempos ---------------------------------------------------------------
 WIFI_TIMEOUT_MS = 10000    # plazo máximo para conseguir IP
 WIFI_REINTENTO_MS = 300    # pausa entre consultas de isconnected()
 PERIODO_SONDEO_MS = 150    # periodo del bucle principal
+LATIDO_MS = 15000          # cada cuánto se reconfirma "online" aunque nada cambie
+RECONEXION_MS = 2000       # pausa antes de reintentar tras perder la conexión
 
 # --- Cableado --------------------------------------------------------------
 # DIP switch: la posición en la lista es el peso del bit. DIP_PINS[0] es el LSB
@@ -201,11 +204,35 @@ def publicar_estado(client, bits, valor):
     La cadena binaria va de MSB a LSB, que es como se lee el switch en el
     montaje y como la espera el panel: script.js parte el payload por la coma,
     usa el primer campo para los indicadores de bit y el segundo para el dígito.
+
+    Se publica con retain=True para que el broker guarde este último valor:
+    si alguien abre (o recarga) el panel web después de que el switch ya se
+    movió, ve de inmediato la posición actual en vez de una pantalla vacía
+    hasta el próximo cambio físico.
     """
     bits_msb_primero = "".join(str(bit) for bit in reversed(bits))
     payload = f"{bits_msb_primero},{valor}"
-    client.publish(TOPIC_ESTADO, payload.encode())
+    client.publish(TOPIC_ESTADO, payload.encode(), retain=True)
     print("Publicado:", payload)
+
+
+def conectar_mqtt():
+    """Crea el cliente MQTT, deja anunciada la presencia y se suscribe.
+
+    El last will (set_last_will) es un mensaje que el propio broker publica en
+    lugar de la ESP32 si la conexión se corta de golpe (se apaga la placa, se
+    cae el WiFi, se cierra la pestaña del simulador). Así el panel web puede
+    distinguir "la placa está encendida pero nadie mueve el switch" de "la
+    placa ya no está".
+    """
+    client = MQTTClient(MQTT_CLIENT_ID, MQTT_BROKER)
+    client.set_callback(al_llegar_comando)
+    client.set_last_will(TOPIC_PRESENCIA, b"offline", retain=True, qos=0)
+    client.connect()
+    client.subscribe(TOPIC_CONTROL)
+    client.publish(TOPIC_PRESENCIA, b"online", retain=True)
+    print("MQTT conectado. Escuchando en:", TOPIC_CONTROL)
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -215,38 +242,64 @@ def main():
     apagar_display()
     conectar_wifi()
 
-    client = MQTTClient(MQTT_CLIENT_ID, MQTT_BROKER)
-    client.set_callback(al_llegar_comando)
-    client.connect()
-    client.subscribe(TOPIC_CONTROL)
-    print("MQTT conectado. Escuchando en:", TOPIC_CONTROL)
+    client = conectar_mqtt()
 
     # None y no 0, para que la primera vuelta publique el estado inicial aunque
     # el switch esté en cero.
     ultimo_valor = None
+    ultimo_latido = time.ticks_ms()
 
     try:
         while True:
-            # check_msg no bloquea: si no hay nada pendiente vuelve enseguida y
-            # el bucle sigue atendiendo el DIP switch.
-            client.check_msg()
+            try:
+                # check_msg no bloquea: si no hay nada pendiente vuelve
+                # enseguida y el bucle sigue atendiendo el DIP switch.
+                client.check_msg()
 
-            bits = leer_bits_dip()
-            valor = valor_de_bits(bits)
+                bits = leer_bits_dip()
+                valor = valor_de_bits(bits)
 
-            # Solo se publica en los cambios. Hacerlo en cada vuelta llenaría el
-            # broker con el mismo dato seis o siete veces por segundo.
-            if valor != ultimo_valor:
-                mostrar_digito(valor)
-                publicar_estado(client, bits, valor)
-                ultimo_valor = valor
+                # Solo se publica en los cambios. Hacerlo en cada vuelta
+                # llenaría el broker con el mismo dato varias veces por
+                # segundo.
+                if valor != ultimo_valor:
+                    mostrar_digito(valor)
+                    publicar_estado(client, bits, valor)
+                    ultimo_valor = valor
 
-            # Pausa corta: da tiempo a que se asienten los contactos del switch
-            # y evita que el bucle acapare el procesador.
+                # Reconfirma "online" cada cierto tiempo aunque nada cambie:
+                # algunos brokers tardan en notar una caída silenciosa de la
+                # conexión, así que no conviene depender solo del last will.
+                if time.ticks_diff(time.ticks_ms(), ultimo_latido) > LATIDO_MS:
+                    client.publish(TOPIC_PRESENCIA, b"online", retain=True)
+                    ultimo_latido = time.ticks_ms()
+
+            except OSError as error:
+                # Típico si el WiFi parpadea o el broker cierra el socket.
+                # Se reintenta la conexión en vez de dejar morir el programa
+                # (y, con él, la publicación de cambios del switch).
+                print("Conexión MQTT perdida, reintentando:", error)
+                try:
+                    client.disconnect()
+                except OSError:
+                    pass
+                time.sleep_ms(RECONEXION_MS)
+                if not network.WLAN(network.STA_IF).isconnected():
+                    conectar_wifi()
+                client = conectar_mqtt()
+                ultimo_valor = None       # fuerza republicar el estado actual
+                ultimo_latido = time.ticks_ms()
+
+            # Pausa corta: da tiempo a que se asienten los contactos del
+            # switch y evita que el bucle acapare el procesador.
             time.sleep_ms(PERIODO_SONDEO_MS)
     finally:
-        # Cierra la sesión al detener el simulador, para no dejar el ID de
-        # cliente colgado en el broker.
+        # Avisa que se apaga de forma ordenada y cierra la sesión, para no
+        # dejar el ID de cliente colgado en el broker.
+        try:
+            client.publish(TOPIC_PRESENCIA, b"offline", retain=True)
+        except OSError:
+            pass
         client.disconnect()
 
 
